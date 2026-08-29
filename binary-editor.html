@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>バイナリヘクスエディタ</title>
+<style>
+:root{
+  --bg:#14161b; --panel:#1b1e26; --line:#2a2f3d; --txt:#d8dee9; --dim:#7f8798;
+  --acc:#58a6ff; --cur:#388bfd; --selbg:#203a61; --match:#6e5712; --ok:#3fb950; --err:#f85149;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;background:var(--bg);color:var(--txt);
+ font:14px/1.5 "Segoe UI","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;overflow:hidden}
+header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-size:15px;white-space:nowrap}
+.fname{color:var(--acc);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp{flex:1}
+.fsz{color:var(--dim);font-size:12px;white-space:nowrap}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.toolbar button,.toolbar select,.toolbar input{background:#232836;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 10px;font-size:13px;cursor:pointer}
+.toolbar input{cursor:text}
+.toolbar button:hover:not(:disabled){border-color:var(--acc);color:#fff}
+.toolbar button:disabled{opacity:.4;cursor:default}
+.toolbar input:focus,.toolbar select:focus{outline:none;border-color:var(--acc)}
+.sep{width:1px;height:20px;background:var(--line);margin:0 4px;flex:none}
+#viewport{flex:1;position:relative;overflow:auto;overscroll-behavior:contain;background:var(--bg)}
+#scroller{position:relative;width:max-content;min-width:100%}
+#rows{position:absolute;left:0;top:0;width:max-content}
+.row{display:grid;grid-template-columns:9ch repeat(7,3ch) 3ch 2ch repeat(8,3ch) 1ch repeat(16,1ch);
+ font:13px/24px ui-monospace,"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;height:24px;user-select:none;white-space:pre}
+.row:hover{background:rgba(255,255,255,.03)}
+.off{color:var(--dim)}
+.hc,.ac{cursor:text;border-radius:2px}
+.pad{color:transparent;cursor:default}
+.cur{background:var(--cur);color:#fff}
+.sel{background:var(--selbg)}
+.m{background:var(--match);color:#fff}
+.cur.m{background:var(--cur)}
+.hexin{font:13px/1 ui-monospace,Consolas,monospace;background:#0d1017;color:#fff;border:1px solid var(--acc);border-radius:3px;outline:none;padding:3px 1px;width:24px;text-align:center}
+.hexin.ascin{width:18px;font-family:inherit}
+#statusbar{display:flex;gap:18px;align-items:center;padding:5px 14px;background:var(--panel);border-top:1px solid var(--line);font:12px ui-monospace,Consolas,monospace;color:var(--dim);min-height:28px;overflow:hidden}
+#statusbar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#flash{margin-left:auto;color:var(--ok);opacity:0;transition:opacity .4s}
+#welcome{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;overflow:auto;background:var(--bg);z-index:5}
+.wcard{max-width:600px;margin:24px;padding:28px 32px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.wcard h1{margin:0 0 8px;font-size:22px}
+.wcard p{color:var(--dim);margin:6px 0}
+.wbtns{display:flex;gap:10px;margin:16px 0;flex-wrap:wrap}
+.wbtns button{background:var(--acc);border:none;color:#fff;font-size:15px;padding:10px 18px;border-radius:8px;cursor:pointer}
+.wbtns button.secondary{background:#232836;border:1px solid var(--line);color:var(--txt)}
+.wbtns button:hover{filter:brightness(1.12)}
+.keys{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+.keys td{padding:4px 8px;border-bottom:1px solid var(--line)}
+.keys td:first-child{color:var(--acc);white-space:nowrap;font-family:ui-monospace,Consolas,monospace}
+.hint{color:var(--dim);font-size:12px}
+#dropoverlay{position:fixed;inset:0;background:rgba(20,22,27,.85);display:none;align-items:center;justify-content:center;z-index:50;pointer-events:none}
+#dropoverlay.show{display:flex}
+#dropoverlay div{border:3px dashed var(--acc);border-radius:16px;padding:40px 60px;font-size:20px;color:var(--acc)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:40}
+#modal[hidden]{display:none}
+.mcard{width:min(480px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.mhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:700;font-size:15px}
+.mhead button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px}
+#mbody label{display:block;margin:10px 0 4px;color:var(--dim);font-size:13px}
+#mbody input,#mbody textarea{width:100%;background:#0d1017;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 9px;font:13px ui-monospace,Consolas,monospace}
+#mbody textarea{resize:vertical}
+#mbody input:focus,#mbody textarea:focus{outline:none;border-color:var(--acc)}
+.mfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.mfoot button{background:#232836;border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:7px 16px;cursor:pointer;font-size:13px}
+.mfoot button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
+.mfoot button:hover{filter:brightness(1.15)}
+</style>
+</head>
+<body>
+<header>
+ <div class="brand">🧬 バイナリヘクスエディタ</div>
+ <div class="fname" id="fname">ファイル未読み込み</div>
+ <div class="sp"></div>
+ <div class="fsz" id="fsz"></div>
+</header>
+<div class="toolbar">
+ <button id="b-open" title="ファイルを開く">📂 開く</button>
+ <button id="b-save" title="保存 / ダウンロード (Ctrl+S)">💾 保存</button>
+ <span class="sep"></span>
+ <button id="b-undo" title="元に戻す (Ctrl+Z)">↩ 元に戻す</button>
+ <button id="b-redo" title="やり直す (Ctrl+Y)">↪ やり直す</button>
+ <span class="sep"></span>
+ <button id="b-ins" title="バイト列を挿入">＋ 挿入…</button>
+ <button id="b-del" title="選択範囲(またはカーソル位置1バイト)を削除">－ 削除</button>
+ <button id="b-fill" title="カーソル位置から塗りつぶし">🪣 塗りつぶし…</button>
+ <button id="b-savesel" title="選択範囲をファイルとして保存">📦 選択を保存</button>
+ <span class="sep"></span>
+ <button id="b-copy" title="選択範囲を16進テキストでコピー (Ctrl+C)">⧉ コピー</button>
+ <button id="b-cut" title="切り取り (Ctrl+X)">✂ 切り取り</button>
+ <button id="b-paste" title="クリップボードを貼り付け (Ctrl+V)">📋 貼り付け</button>
+ <span class="sep"></span>
+ <input id="search" placeholder="検索" size="16" title="16進 (DE AD) または テキスト">
+ <select id="searchmode" title="検索モード">
+  <option value="hex">16進</option>
+  <option value="text">テキスト</option>
+ </select>
+ <button id="b-find" title="次を検索 (F3)">→ 次</button>
+ <button id="b-findprev" title="前を検索 (Shift+F3)">← 前</button>
+ <span class="sep"></span>
+ <input id="goto" placeholder="0x00000000" size="12" title="移動先オフセット (16進)">
+ <button id="b-goto" title="オフセットへ移動">移動</button>
+ <span class="sep"></span>
+ <button id="b-help" title="操作ガイド">？</button>
+</div>
+<div id="viewport">
+ <div id="welcome">
+  <div class="wcard">
+   <h1>🧬 バイナリヘクスエディタ</h1>
+   <p>あらゆるファイル(画像・動画・実行ファイル・テキストなど)をブラウザ上で開いて、16進 / ASCII で直接編集できます。すべてローカル処理で、ファイルは外部に送信されません。</p>
+   <div class="wbtns">
+    <button id="w-open">📂 ファイルを開く</button>
+    <button id="w-sample" class="secondary">サンプル(1×1 PNG)を開く</button>
+   </div>
+   <p class="hint">※ ウィンドウにファイルをドラッグ&amp;ドロップしても開けます。Chrome / Edge では「保存」すると、開いたファイルそのものを書き換えることができます。</p>
+   <table class="keys">
+    <tr><td>バイトをクリック</td><td>その場で編集(2桁16進 or 1文字)。16進文字を直接入力でも可</td></tr>
+    <tr><td>矢印キー / PgUp・PgDn</td><td>カーソル移動</td></tr>
+    <tr><td>Shift + クリック / 矢印</td><td>範囲選択</td></tr>
+    <tr><td>Delete / Backspace</td><td>選択範囲(または1バイト)を削除</td></tr>
+    <tr><td>F3 / Shift+F3</td><td>次 / 前の一致へ(ツールバーの検索欄使用)</td></tr>
+    <tr><td>Ctrl + Z / Y</td><td>元に戻す / やり直す</td></tr>
+    <tr><td>Ctrl + C / X / V</td><td>コピー(16進テキスト) / 切り取り / 貼り付け</td></tr>
+    <tr><td>Ctrl + S</td><td>保存(File System API 非対応時はダウンロード)</td></tr>
+   </table>
+  </div>
+ </div>
+ <div id="scroller"><div id="rows"></div></div>
+</div>
+<div id="statusbar">
+ <span id="st-pos"></span>
+ <span id="st-byte"></span>
+ <span id="st-sel"></span>
+ <span id="st-undo"></span>
+ <span id="flash"></span>
+</div>
+<div id="dropoverlay"><div>📥 ファイルをドロップして開く</div></div>
+<div id="modal" hidden>
+ <div class="mcard">
+  <div class="mhead"><span id="mtitle"></span><button id="mclose" title="閉じる">✕</button></div>
+  <div id="mbody"></div>
+  <div class="mfoot"><button id="mcancel">キャンセル</button><button id="mok" class="primary">OK</button></div>
+ </div>
+</div>
+<input type="file" id="fileinput" hidden>
+<script>
+'use strict';
+/* ================= 定数・状態 ================= */
+const BPR=16, ROWH=24, UNDO_MAX=200, MATCH_MAX=2000, MATCHSET_MAX=40000;
+const $=s=>document.querySelector(s);
+const viewport=$('#viewport'), scroller=$('#scroller'), rowsEl=$('#rows'),
+ fnameEl=$('#fname'), fszEl=$('#fsz'),
+ stPos=$('#st-pos'), stByte=$('#st-byte'), stSel=$('#st-sel'), stUndo=$('#st-undo'), flashEl=$('#flash'),
+ welcome=$('#welcome'), dropOverlay=$('#dropoverlay'),
+ modal=$('#modal'), mtitle=$('#mtitle'), mbody=$('#mbody'), mok=$('#mok'), mcancel=$('#mcancel'),
+ searchEl=$('#search'), searchModeEl=$('#searchmode'), gotoEl=$('#goto'), fileInput=$('#fileinput'),
+ bUndo=$('#b-undo'), bRedo=$('#b-redo');
+
+let data=null, fileHandle=null, fileName='', fileType='';
+let size0=0, dirty=false;
+let undoStack=[], redoStack=[];
+let cursor=0, selA=-1, selB=-1;
+let editing=null;
+let matchRanges=[], matchSet=new Set();
+let modalOpen=false;
+let flashTimer=null;
+
+const hasSel=()=>selA>=0&&selB>=0;
+const selLo=()=>hasSel()?Math.min(selA,selB):-1;
+const selHi=()=>hasSel()?Math.max(selA,selB):-1;
+function clamp(o){ if(!data) return 0; return Math.max(0,Math.min(data.length-1,o)); }
+function hex(n,w=2){ return n.toString(16).toUpperCase().padStart(w,'0'); }
+function flash(msg,ms=3000){
+ flashEl.textContent=msg; flashEl.style.opacity=1;
+ clearTimeout(flashTimer); flashTimer=setTimeout(()=>{flashEl.style.opacity=0;},ms);
+}
+/* ================= データ操作 ================= */
+function splice(start,beforeLen,after){
+ const nd=new Uint8Array(data.length-beforeLen+after.length);
+ nd.set(data.subarray(0,start),0);
+ nd.set(after,start);
+ nd.set(data.subarray(start+beforeLen),start+after.length);
+ return nd;
+}
+function clampSel(){
+ if(!data||data.length===0){ selA=selB=-1; return; }
+ if(selA<0||selB<0){ selA=selB=-1; return; }
+ selA=Math.min(selA,data.length-1);
+ selB=Math.min(selB,data.length-1);
+}
+function applyOp(start,before,after,keepSel=false){
+ const b=Uint8Array.from(before), a=Uint8Array.from(after);
+ start=Math.max(0,Math.min(data.length,start));
+ undoStack.push({start,before:b,after:a});
+ if(undoStack.length>UNDO_MAX) undoStack.shift();
+ redoStack.length=0;
+ data=splice(start,b.length,a);
+ dirty=true;
+ cursor=clamp(cursor);
+ if(keepSel) clampSel(); else { selA=selB=-1; }
+}
+function setData(off,val){
+ if(!data||off<0||off>=data.length) return;
+ if(data[off]===val) return;
+ applyOp(off,data.subarray(off,off+1),[val],true);
+ render();
+}
+function insertAt(start,bytes){ applyOp(start,new Uint8Array(0),bytes); }
+function deleteAt(start,len){
+ if(!data||len<=0) return;
+ len=Math.min(len,data.length-start);
+ if(len<=0) return;
+ applyOp(start,data.subarray(start,start+len),new Uint8Array(0));
+ cursor=clamp(Math.min(start,data.length-1));
+}
+function fillAt(start,len,pattern){
+ if(!data||len<=0||!pattern.length) return;
+ len=Math.min(len,data.length-start);
+ if(len<=0) return;
+ const before=data.subarray(start,start+len);
+ const after=new Uint8Array(len);
+ for(let i=0;i<len;i++) after[i]=pattern[i%pattern.length];
+ applyOp(start,before,after);
+ cursor=clamp(start);
+}
+function undo(){
+ const op=undoStack.pop(); if(!op) return;
+ data=splice(op.start,op.after.length,op.before);
+ redoStack.push(op);
+ dirty=true; cursor=clamp(cursor); clampSel(); render();
+}
+function redo(){
+ const op=redoStack.pop(); if(!op) return;
+ data=splice(op.start,op.before.length,op.after);
+ undoStack.push(op);
+ dirty=true; cursor=clamp(cursor); clampSel(); render();
+}
+/* ================= 読み込み・保存 ================= */
+async function loadFile(file,handle){
+ try{
+  flash('読み込み中…',60000);
+  const buf=await file.arrayBuffer();
+  data=new Uint8Array(buf);
+ }catch(e){ flash('読み込み失敗: '+e.message); return; }
+ fileName=file.name; fileType=file.type||'';
+ fileHandle=handle||null; size0=data.length;
+ undoStack=[]; redoStack=[]; cursor=0; selA=selB=-1;
+ matchRanges=[]; matchSet=new Set(); dirty=false;
+ viewport.scrollTop=0;
+ render();
+ flash(`${file.name} を開きました (${data.length.toLocaleString()} バイト)`);
+}
+function loadBytes(bytes,name,type){
+ data=bytes; fileName=name; fileType=type||''; fileHandle=null; size0=bytes.length;
+ undoStack=[]; redoStack=[]; cursor=0; selA=selB=-1;
+ matchRanges=[]; matchSet=new Set(); dirty=false;
+ viewport.scrollTop=0;
+ render();
+ flash(`${name} を開きました (${data.length} バイト)`);
+}
+async function openFile(){
+ if(dirty && !confirm('未保存の変更があります。それでも開きますか？')) return;
+ if(window.showOpenFilePicker){
+  try{
+   const [h]=await window.showOpenFilePicker({multiple:false});
+   const f=await h.getFile();
+   await loadFile(f,h); return;
+  }catch(e){ if(e && e.name==='AbortError') return; /* 以下 input にフォールスルー */ }
+ }
+ fileInput.click();
+}
+function downloadBytes(bytes,name){
+ const blob=new Blob([bytes],{type:'application/octet-stream'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url; a.download=name;
+ document.body.appendChild(a); a.click(); a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),10000);
+}
+async function saveFile(){
+ if(!data) return flash('ファイル未読み込み');
+ if(fileHandle){
+  try{
+   const w=await fileHandle.createWritable();
+   await w.write(data);
+   await w.close();
+   dirty=false; render();
+   flash('保存しました(上書き)'); return;
+  }catch(e){ flash('直接保存に失敗 → ダウンロードします'); }
+ }
+ downloadBytes(data,fileName||'binary.bin');
+ flash('ダウンロードしました: '+(fileName||'binary.bin'));
+}
+/* ================= 描画 ================= */
+function render(){
+ if(!data){
+  welcome.style.display='flex';
+  scroller.style.display='none';
+  fnameEl.textContent='ファイル未読み込み';
+  fszEl.textContent='';
+  stPos.textContent=''; stByte.textContent=''; stSel.textContent=''; stUndo.textContent='';
+  bUndo.disabled=true; bRedo.disabled=true;
+  return;
+ }
+ welcome.style.display='none';
+ scroller.style.display='block';
+ if(editing) editing=null; /* スクロール等でセルが再構築された場合は編集を破棄 */
+ const totalRows=Math.max(1,Math.ceil(data.length/BPR));
+ scroller.style.height=(totalRows*ROWH)+'px';
+ const vpTop=viewport.scrollTop, vpH=viewport.clientHeight;
+ let first=Math.floor(vpTop/ROWH)-8;
+ let last=Math.ceil((vpTop+vpH)/ROWH)+8;
+ first=Math.max(0,first); last=Math.min(totalRows,last);
+ const lo=selLo(), hi=selHi();
+ let html='';
+ for(let r=first;r<last;r++) html+=rowHtml(r,lo,hi);
+ rowsEl.style.top=(first*ROWH)+'px';
+ rowsEl.innerHTML=html;
+ fnameEl.textContent=(dirty?'● ':'')+fileName;
+ fszEl.textContent=data.length.toLocaleString()+' バイト (0x'+hex(data.length,8)+')'
+  +(fileType?' · '+fileType:'')
+  +(data.length!==size0?' / 元 '+size0.toLocaleString()+' バイト':'');
+ stPos.textContent='0x'+hex(cursor,8)+' ('+cursor.toLocaleString()+')';
+ if(data.length){
+  const v=data[cursor];
+  stByte.textContent='= 0x'+hex(v,2)+' ('+v+') '+(v>=0x20&&v<0x7f?'"'+String.fromCharCode(v)+'"':'(非表示)');
+ } else stByte.textContent='(空ファイル)';
+ stSel.textContent=hasSel()
+  ? '選択: '+(hi-lo+1)+' バイト (0x'+hex(lo,8)+'〜0x'+hex(hi,8)+')'
+  : (matchRanges.length?'一致: '+matchRanges.length+' 件':'');
+ stUndo.textContent='履歴: '+undoStack.length+'/'+UNDO_MAX;
+ bUndo.disabled=!undoStack.length;
+ bRedo.disabled=!redoStack.length;
+}
+function rowHtml(r,lo,hi){
+ const off0=r*BPR;
+ let h='<div class="row"><span class="off">0x'+hex(off0,8)+'</span>';
+ for(let i=0;i<BPR;i++){
+  const o=off0+i;
+  if(o<data.length){
+   const v=data[o];
+   let cls='hc';
+   if(o===cursor) cls+=' cur';
+   if(o>=lo&&o<=hi) cls+=' sel';
+   if(matchSet.has(o)) cls+=' m';
+   h+='<span class="'+cls+'" data-off="'+o+'" data-kind="hex" title="0x'+hex(o,8)+' = 0x'+hex(v,2)+' ('+v+')">'+hex(v,2)+'</span>';
+  } else {
+   h+='<span class="hc pad"></span>';
+  }
+  if(i===7) h+='<span class="gap"></span>';
+ }
+ h+='<span class="gap"></span>';
+ for(let i=0;i<BPR;i++){
+  const o=off0+i;
+  if(o<data.length){
+   const v=data[o];
+   let cls='ac';
+   if(o===cursor) cls+=' cur';
+   if(o>=lo&&o<=hi) cls+=' sel';
+   if(matchSet.has(o)) cls+=' m';
+   const ch=(v>=0x20&&v<0x7f)?String.fromCharCode(v):'·';
+   const esc=ch.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+   h+='<span class="'+cls+'" data-off="'+o+'" data-kind="asc">'+esc+'</span>';
+  } else {
+   h+='<span class="ac pad">&nbsp;</span>';
+  }
+ }
+ return h+'</div>';
+}
+function ensureVisible(o){
+ if(!data) return;
+ const r=Math.floor(o/BPR);
+ const top=r*ROWH;
+ const vpTop=viewport.scrollTop, vpH=viewport.clientHeight;
+ if(top<vpTop+ROWH*2) viewport.scrollTop=Math.max(0,(r-2)*ROWH);
+ else if(top+ROWH>vpTop+vpH-ROWH*2)
+  viewport.scrollTop=Math.max(0,(r-Math.max(1,Math.floor(vpH/ROWH)-3))*ROWH);
+}
+function scrollToCenter(o){
+ viewport.scrollTop=Math.max(0,Math.floor(o/BPR)*ROWH-viewport.clientHeight/2);
+}
+/* ================= バイト編集 ================= */
+function cellEl(o,kind){
+ return rowsEl.querySelector('[data-off="'+o+'"][data-kind="'+kind+'"]');
+}
+function startEdit(o,kind,init){
+ if(!data) return;
+ o=clamp(o);
+ if(editing) finishEdit(true);
+ const c=cellEl(o,kind);
+ if(!c){ ensureVisible(o); render(); return; }
+ editing={off:o,kind,cell:c};
+ c.classList.add('edit');
+ const inp=document.createElement('input');
+ inp.className='hexin'+(kind==='asc'?' ascin':'');
+ inp.spellcheck=false; inp.autocapitalize='off'; inp.autocomplete='off';
+ if(kind==='hex'){
+  inp.maxLength=2;
+  inp.value=(init!=null)?init:hex(data[o],2);
+  if(init==null) inp.select();
+ } else {
+  inp.maxLength=1;
+  inp.value=(init!=null)?init:((data[o]>=0x20&&data[o]<0x7f)?String.fromCharCode(data[o]):'');
+  if(init==null) inp.select();
+ }
+ c.textContent='';
+ c.appendChild(inp);
+ inp.addEventListener('keydown',onEditKey);
+ inp.addEventListener('input',onEditInput);
+ inp.addEventListener('blur',()=>finishEdit(true));
+ inp.focus();
+ if(init!=null) inp.setSelectionRange(inp.value.length,inp.value.length);
+}
+function onEditInput(e){
+ if(!editing) return;
+ const inp=e.target;
+ if(editing.kind==='hex'){
+  const v=inp.value.replace(/[^0-9a-fA-F]/g,'').slice(0,2);
+  if(v!==inp.value) inp.value=v;
+ } else {
+  inp.value=inp.value.slice(-1);
+ }
+}
+function onEditKey(e){
+ if(!editing) return;
+ e.stopPropagation();
+ const k=e.key;
+ if(k==='Enter'){
+  e.preventDefault();
+  finishEdit(true);
+  cursor=clamp(cursor+1); ensureVisible(cursor); render();
+ } else if(k==='Tab'){
+  e.preventDefault();
+  const d=e.shiftKey?-1:1;
+  const off=editing.off;
+  finishEdit(true);
+  cursor=clamp(off+d); ensureVisible(cursor); render();
+ } else if(k==='Escape'){
+  e.preventDefault();
+  finishEdit(false);
+ }
+}
+function finishEdit(commit){
+ if(!editing) return;
+ const off=editing.off, kind=editing.kind;
+ const input=editing.cell.querySelector('input');
+ editing=null;
+ let done=false;
+ if(commit&&input){
+  const val=(input.value||'').trim();
+  if(kind==='hex'){
+   if(/^[0-9a-fA-F]{1,2}$/.test(val)){ setData(off,parseInt(val,16)); done=true; }
+  } else if(val.length===1){
+   setData(off,val.charCodeAt(0)&0xff); done=true;
+  }
+ }
+ if(!done) render();
+}
+/* ================= 検索 ================= */
+function parseHex(s){
+ const t=(s||'').trim().replace(/[\s,;_]+/g,'');
+ if(!t) return null;
+ if(!/^[0-9A-Fa-f]+$/.test(t)) return null;
+ if(t.length%2!==0) return null;
+ const out=new Uint8Array(t.length/2);
+ for(let i=0;i<out.length;i++) out[i]=parseInt(t.slice(i*2,i*2+2),16);
+ return out;
+}
+function queryBytes(){
+ const t=searchEl.value;
+ if(!t) return null;
+ if(searchModeEl.value==='hex'){
+  const b=parseHex(t);
+  if(!b){ flash('16進数の形式が不正です'); return null; }
+  return b;
+ }
+ return new TextEncoder().encode(t);
+}
+function matchAt(i,q){
+ for(let j=1;j<q.length;j++) if(data[i+j]!==q[j]) return false;
+ return true;
+}
+function doSearch(dir){
+ if(!data) return flash('ファイル未読み込み');
+ const q=queryBytes(); if(!q) return;
+ if(q.length>data.length){
+  matchRanges=[]; matchSet=new Set(); render();
+  return flash('検索対象がファイルより大きいです');
+ }
+ matchRanges=[];
+ const lim=data.length-q.length;
+ for(let i=0;i<=lim;i++){
+  if(data[i]===q[0]&&matchAt(i,q)) matchRanges.push(i);
+  if(matchRanges.length>=MATCH_MAX) break;
+ }
+ matchSet=new Set();
+ for(const m of matchRanges){
+  for(let j=0;j<q.length&&matchSet.size<MATCHSET_MAX;j++) matchSet.add(m+j);
+ }
+ if(!matchRanges.length){ flash('一致なし'); render(); return; }
+ let idx;
+ if(dir>0){
+  idx=matchRanges.findIndex(m=>m>cursor);
+  if(idx<0) idx=0;
+ } else {
+  idx=-1;
+  for(let i=matchRanges.length-1;i>=0;i--){
+   if(matchRanges[i]<cursor){ idx=i; break; }
+  }
+  if(idx<0) idx=matchRanges.length-1;
+ }
+ const m=matchRanges[idx];
+ selA=m; selB=m+q.length-1; cursor=m;
+ scrollToCenter(m);
+ render();
+ flash('一致 '+(idx+1)+' / '+matchRanges.length+' @ 0x'+hex(m,8));
+}
+/* ================= コピー / 貼り付け ================= */
+function selRange(){
+ const a=hasSel()?selLo():cursor;
+ const b=hasSel()?selHi():cursor;
+ return [a,Math.max(a,Math.min(b,data.length-1))];
+}
+function copySel(){
+ if(!data) return flash('ファイル未読み込み');
+ const a=selRange()[0], b=selRange()[1];
+ const bytes=data.subarray(a,b+1);
+ const lines=[];
+ for(let i=0;i<bytes.length;i+=BPR){
+  const row=[];
+  for(let j=0;j<BPR&&i+j<bytes.length;j++) row.push(hex(bytes[i+j],2));
+  lines.push(row.join(' '));
+ }
+ const text=lines.join('\n');
+ if(navigator.clipboard&&navigator.clipboard.writeText){
+  navigator.clipboard.writeText(text)
+   .then(()=>flash(bytes.length+' バイトを16進テキストとしてコピーしました'))
+   .catch(()=>flash('コピーに失敗しました'));
+ } else flash('クリップボードが利用できません');
+}
+async function pasteSel(){
+ if(!data) return flash('ファイル未読み込み');
+ let text='';
+ try{ text=await navigator.clipboard.readText(); }
+ catch(e){ return flash('クリップボードの読み取りに失敗(権限)。「挿入…」に貼り付けてもOKです'); }
+ if(!text) return flash('クリップボードが空です');
+ let bytes=null;
+ const t=text.trim();
+ if(/^[\s0-9a-fA-F]+$/.test(t)){
+  const h=parseHex(t);
+  if(h&&h.length) bytes=h; /* 16進文字のみならバイナリとして貼る */
+ }
+ if(!bytes) bytes=new TextEncoder().encode(text);
+ const a=selRange()[0], b=selRange()[1];
+ applyOp(a,data.subarray(a,b+1),bytes);
+ cursor=clamp(a+bytes.length-1);
+ ensureVisible(cursor);
+ render();
+ flash(bytes.length+' バイトを貼り付けました');
+}
+function cutSel(){ copySel(); deleteSel(); }
+function deleteSel(){
+ if(!data) return flash('ファイル未読み込み');
+ const a=selRange()[0], b=selRange()[1];
+ const n=b-a+1;
+ deleteAt(a,n);
+ render();
+ flash(n+' バイトを削除しました');
+}
+function saveSel(){
+ if(!data) return flash('ファイル未読み込み');
+ const a=selRange()[0], b=selRange()[1];
+ const bytes=data.subarray(a,b+1);
+ const base=(fileName||'binary').replace(/\.[^.]+$/,'');
+ const m=fileName.match(/\.[^.]+$/);
+ const ext=m?m[0]:'.bin';
+ downloadBytes(bytes,base+'_sel_0x'+hex(a,8)+ext);
+ flash(bytes.length+' バイトをファイルとして保存しました');
+}
+/* ================= ダイアログ ================= */
+function openModal(title,bodyHtml,okLabel,onOk){
+ mtitle.textContent=title;
+ mbody.innerHTML=bodyHtml;
+ mok.textContent=okLabel||'OK';
+ modalOpen=true;
+ modal.hidden=false;
+ const f=mbody.querySelector('input,textarea,select');
+ if(f){ f.focus(); if(f.select){ try{f.select();}catch(e){} } }
+ mok.onclick=()=>{
+  const r=onOk?onOk():true;
+  if(r!==false) closeModal();
+ };
+}
+function closeModal(){ modal.hidden=true; modalOpen=false; }
+function keysTableHtml(){
+ return '<table class="keys">'
+ +'<tr><td>クリック</td><td>そのバイトを編集(16進 / ASCIIどちらの欄でも可)</td></tr>'
+ +'<tr><td>Enter / F2</td><td>カーソル位置を編集</td></tr>'
+ +'<tr><td>矢印 / PgUp / PgDn</td><td>カーソル移動</td></tr>'
+ +'<tr><td>Shift+クリック / 矢印</td><td>範囲選択</td></tr>'
+ +'<tr><td>Delete / Backspace</td><td>選択範囲(または1バイト)を削除</td></tr>'
+ +'<tr><td>16進文字 (0-9 A-F)</td><td>入力と同時に編集開始</td></tr>'
+ +'<tr><td>F3 / Shift+F3</td><td>次 / 前の一致へ</td></tr>'
+ +'<tr><td>Ctrl+Z / Ctrl+Y</td><td>元に戻す / やり直す</td></tr>'
+ +'<tr><td>Ctrl+C / X / V</td><td>コピー(16進テキスト) / 切り取り / 貼り付け</td></tr>'
+ +'<tr><td>Ctrl+A</td><td>全体選択</td></tr>'
+ +'<tr><td>Ctrl+S</td><td>保存</td></tr>'
+ +'<tr><td>Home / End</td><td>行頭 / 行末 (Ctrl付きでファイル頭 / 尾)</td></tr>'
+ +'</table>';
+}
+function dlgHelp(){
+ openModal('操作ガイド',keysTableHtml(),'OK',undefined);
+}
+function dlgInsert(){
+ if(!data) return flash('ファイル未読み込み');
+ const at=hasSel()?selLo():cursor;
+ openModal('バイトを挿入',
+  '<label>挿入位置: <b>0x'+hex(at,8)+'</b>'+(hasSel()?' (選択範囲 '+(selHi()-selLo()+1)+' バイトは置換されます)':'')+'</label>'
+  +'<label>バイト列(16進、スペース区切り可)</label>'
+  +'<textarea id="mi" rows="3" spellcheck="false">DE AD BE EF</textarea>'
+  +'<p class="hint">例: 「48 65 6C 6C 6F」 → "Hello" が挿入されます。空欄はキャンセル扱い。</p>',
+  '挿入',
+  ()=>{
+   const s=$('#mi').value.trim();
+   if(!s) return false;
+   const b=parseHex(s);
+   if(!b){ flash('16進数が不正です'); return false; }
+   const a=hasSel()?selLo():cursor;
+   const before=hasSel()?data.subarray(a,selHi()+1):new Uint8Array(0);
+   applyOp(a,before,b);
+   cursor=clamp(a+b.length-1);
+   ensureVisible(cursor);
+   render();
+   flash(b.length+' バイトを挿入しました');
+   return true;
+  });
+}
+function dlgDelete(){
+ if(!data) return flash('ファイル未読み込み');
+ const at=hasSel()?selLo():cursor;
+ openModal('バイトを削除',
+  '<label>削除位置: <b>0x'+hex(at,8)+'</b>'+(hasSel()?' (選択範囲の削除)':'')+'</label>'
+  +'<label>削除するバイト数</label>'
+  +'<input type="number" id="md" min="1" max="1073741824" value="'+(hasSel()?(selHi()-selLo()+1):1)+'">',
+  '削除',
+  ()=>{
+   const start=hasSel()?selLo():cursor;
+   const n=hasSel()?(selHi()-selLo()+1):Math.max(1,parseInt($('#md').value,10)||1);
+   if(n<=0) return false;
+   deleteAt(start,n);
+   render();
+   flash(n+' バイトを削除しました');
+   return true;
+  });
+}
+function dlgFill(){
+ if(!data) return flash('ファイル未読み込み');
+ openModal('範囲を塗りつぶし',
+  '<label>開始: <b>0x'+hex(cursor,8)+'</b></label>'
+  +'<label>長さ(バイト)</label><input type="number" id="mf-len" min="1" max="1073741824" value="16">'
+  +'<label>埋めるバイト列(16進)</label><input type="text" id="mf-pat" value="00" spellcheck="false">'
+  +'<p class="hint">「DE AD」なら DE AD DE AD … と繰り返します。ファイル末尾は切り詰められます。</p>',
+  '塗りつぶし',
+  ()=>{
+   const len=Math.max(1,parseInt($('#mf-len').value,10)||1);
+   const pat=parseHex($('#mf-pat').value);
+   if(!pat||!pat.length){ flash('16進数が不正です'); return false; }
+   fillAt(cursor,len,pat);
+   render();
+   flash(len+' バイトを塗りつぶしました');
+   return true;
+  });
+}
+function gotoOffset(){
+ if(!data) return flash('ファイル未読み込み');
+ const t=gotoEl.value.trim();
+ if(!t) return;
+ let off;
+ if(/^0x/i.test(t)) off=parseInt(t,16);
+ else if(/[a-fA-F]/.test(t)) off=parseInt(t,16);
+ else off=parseInt(t,10);
+ if(isNaN(off)||off<0||off>=data.length){ flash('オフセットが範囲外です'); return; }
+ selA=selB=-1;
+ cursor=off;
+ scrollToCenter(off);
+ render();
+}
+/* ================= イベント配線 ================= */
+viewport.addEventListener('mousedown',e=>{
+ if(!data) return;
+ if(e.target.tagName==='INPUT') return; /* 編集入力欄内はそのまま */
+ const c=e.target.closest('[data-off]');
+ if(!c) return;
+ e.preventDefault();
+ const off=+c.dataset.off;
+ if(e.shiftKey){
+  const anchor=hasSel()?selA:cursor;
+  selA=anchor; selB=off;
+  ensureVisible(off);
+  render();
+ } else {
+  selA=selB=-1;
+  cursor=off;
+  startEdit(off,c.dataset.kind);
+ }
+});
+let scrollTicking=false;
+viewport.addEventListener('scroll',()=>{
+ if(scrollTicking) return;
+ scrollTicking=true;
+ requestAnimationFrame(()=>{
+  scrollTicking=false;
+  render();
+ });
+});
+window.addEventListener('resize',()=>{ if(data) render(); });
+function pageRows(){ return Math.max(1,Math.floor(viewport.clientHeight/ROWH)-2); }
+function moveSel(d,extend){
+ if(!data) return;
+ if(extend){
+  if(!hasSel()){ selA=cursor; selB=cursor; }
+  cursor=clamp(cursor+d);
+  selB=cursor;
+ } else {
+  selA=selB=-1;
+  cursor=clamp(cursor+d);
+ }
+ ensureVisible(cursor);
+ render();
+}
+window.addEventListener('keydown',e=>{
+ if(e.key==='Escape'){
+  if(modalOpen){ closeModal(); return; }
+  if(editing){ finishEdit(false); return; }
+  return;
+ }
+ if(modalOpen) return;
+ const t=e.target;
+ if(t&&t.closest&&t.closest('input,textarea,select')) return;
+ if(!data) return;
+ const mod=e.ctrlKey||e.metaKey;
+ if(mod){
+  const k=e.key.toLowerCase();
+  if(k==='z'){ e.preventDefault(); if(e.shiftKey) redo(); else undo(); }
+  else if(k==='y'){ e.preventDefault(); redo(); }
+  else if(k==='c'){ e.preventDefault(); copySel(); }
+  else if(k==='x'){ e.preventDefault(); cutSel(); }
+  else if(k==='v'){ e.preventDefault(); pasteSel(); }
+  else if(k==='a'){ e.preventDefault(); if(data.length){ selA=0; selB=data.length-1; } cursor=0; viewport.scrollTop=0; render(); }
+  else if(k==='f'){ e.preventDefault(); searchEl.focus(); searchEl.select(); }
+  else if(k==='s'){ e.preventDefault(); saveFile(); }
+  return;
+ }
+ if(e.altKey) return;
+ const k=e.key;
+ if(k==='ArrowLeft'){ e.preventDefault(); moveSel(-1,e.shiftKey); }
+ else if(k==='ArrowRight'){ e.preventDefault(); moveSel(1,e.shiftKey); }
+ else if(k==='ArrowUp'){ e.preventDefault(); moveSel(-BPR,e.shiftKey); }
+ else if(k==='ArrowDown'){ e.preventDefault(); moveSel(BPR,e.shiftKey); }
+ else if(k==='PageUp'){ e.preventDefault(); moveSel(-pageRows(),e.shiftKey); }
+ else if(k==='PageDown'){ e.preventDefault(); moveSel(pageRows(),e.shiftKey); }
+ else if(k==='Home'){
+  e.preventDefault();
+  selA=selB=-1;
+  if(e.ctrlKey||e.metaKey){ cursor=0; viewport.scrollTop=0; }
+  else cursor=Math.floor(cursor/BPR)*BPR;
+  render();
+ }
+ else if(k==='End'){
+  e.preventDefault();
+  selA=selB=-1;
+  if(e.ctrlKey||e.metaKey) cursor=data.length-1;
+  else cursor=Math.min(data.length-1,Math.floor(cursor/BPR)*BPR+BPR-1);
+  ensureVisible(cursor);
+  render();
+ }
+ else if(k==='Enter'||k==='F2'){ e.preventDefault(); startEdit(cursor,'hex'); }
+ else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); deleteSel(); }
+ else if(k==='F3'){ e.preventDefault(); doSearch(e.shiftKey?-1:1); }
+ else if(/^[0-9a-fA-F]$/.test(k)){ startEdit(cursor,'hex',k); }
+});
+$('#b-open').onclick=openFile;
+$('#w-open').onclick=openFile;
+$('#b-save').onclick=saveFile;
+bUndo.onclick=undo;
+bRedo.onclick=redo;
+$('#b-ins').onclick=dlgInsert;
+$('#b-del').onclick=deleteSel;
+$('#b-fill').onclick=dlgFill;
+$('#b-savesel').onclick=saveSel;
+$('#b-copy').onclick=copySel;
+$('#b-cut').onclick=cutSel;
+$('#b-paste').onclick=pasteSel;
+$('#b-find').onclick=()=>doSearch(1);
+$('#b-findprev').onclick=()=>doSearch(-1);
+$('#b-goto').onclick=gotoOffset;
+$('#b-help').onclick=dlgHelp;
+$('#w-sample').onclick=()=>{ loadBytes(sampleBytes(),'sample-1x1.png','image/png'); };
+mcancel.onclick=closeModal;
+$('#mclose').onclick=closeModal;
+modal.addEventListener('mousedown',e=>{ if(e.target===modal) closeModal(); });
+mbody.addEventListener('keydown',e=>{
+ if(e.key==='Enter'&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); mok.click(); }
+});
+fileInput.addEventListener('change',async()=>{
+ const f=fileInput.files&&fileInput.files[0];
+ if(f) await loadFile(f,null);
+ fileInput.value='';
+});
+searchEl.addEventListener('keydown',e=>{
+ if(e.key==='Enter'){ e.preventDefault(); doSearch(1); }
+ else if(e.key==='F3'){ e.preventDefault(); doSearch(e.shiftKey?-1:1); }
+});
+gotoEl.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); gotoOffset(); } });
+let dragDepth=0;
+window.addEventListener('dragenter',e=>{
+ if(e.dataTransfer&&Array.prototype.includes.call(e.dataTransfer.types,'Files')){
+  dragDepth++;
+  dropOverlay.classList.add('show');
+ }
+});
+window.addEventListener('dragleave',()=>{
+ dragDepth=Math.max(0,dragDepth-1);
+ if(!dragDepth) dropOverlay.classList.remove('show');
+});
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('drop',e=>{
+ e.preventDefault();
+ dragDepth=0;
+ dropOverlay.classList.remove('show');
+ const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+ if(f) loadFile(f,null);
+});
+window.addEventListener('beforeunload',e=>{
+ if(dirty){ e.preventDefault(); e.returnValue=''; }
+});
+/* ================= サンプル & 初期化 ================= */
+const SAMPLE_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+function sampleBytes(){
+ const bin=atob(SAMPLE_B64);
+ const u=new Uint8Array(bin.length);
+ for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+ return u;
+}
+render();
+</script>
+
+</body>
+</html>
