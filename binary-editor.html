@@ -8,6 +8,7 @@
 :root{
   --bg:#14161b; --panel:#1b1e26; --line:#2a2f3d; --txt:#d8dee9; --dim:#7f8798;
   --acc:#58a6ff; --cur:#388bfd; --selbg:#203a61; --match:#6e5712; --ok:#3fb950; --err:#f85149;
+  --diff:#7d2b2b;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -38,6 +39,8 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
 .sel{background:var(--selbg)}
 .m{background:var(--match);color:#fff}
 .cur.m{background:var(--cur)}
+.d{background:var(--diff);color:#fff}
+.cur.d{background:var(--cur)}
 .hexin{font:13px/1 ui-monospace,Consolas,monospace;background:#0d1017;color:#fff;border:1px solid var(--acc);border-radius:3px;outline:none;padding:3px 1px;width:24px;text-align:center}
 .hexin.ascin{width:18px;font-family:inherit}
 #statusbar{display:flex;gap:18px;align-items:center;padding:5px 14px;background:var(--panel);border-top:1px solid var(--line);font:12px ui-monospace,Consolas,monospace;color:var(--dim);min-height:28px;overflow:hidden}
@@ -107,6 +110,11 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
  <input id="goto" placeholder="0x00000000" size="12" title="移動先オフセット (16進)">
  <button id="b-goto" title="オフセットへ移動">移動</button>
  <span class="sep"></span>
+ <button id="b-cmp" title="比較するファイルを読み込む">比較…</button>
+ <button id="b-diffnext" title="次の差分へ (F6)">次の差分</button>
+ <button id="b-diffprev" title="前の差分へ (Shift+F6)">前の差分</button>
+ <button id="b-cmpclear" title="比較を解除">比較解除</button>
+ <span class="sep"></span>
  <button id="b-help" title="操作ガイド">ヘルプ</button>
 </div>
 <div id="viewport">
@@ -125,6 +133,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
     <tr><td>Shift + クリック / 矢印</td><td>範囲選択</td></tr>
     <tr><td>Delete / Backspace</td><td>選択範囲(または1バイト)を削除</td></tr>
     <tr><td>F3 / Shift+F3</td><td>次 / 前の一致へ(ツールバーの検索欄使用)</td></tr>
+    <tr><td>比較… / F6</td><td>2つ目のファイルを読み込み、異なるバイトを赤く表示。F6 で差分間を移動</td></tr>
     <tr><td>Ctrl + Z / Y</td><td>元に戻す / やり直す</td></tr>
     <tr><td>Ctrl + C / X / V</td><td>コピー(16進テキスト) / 切り取り / 貼り付け</td></tr>
     <tr><td>Ctrl + S</td><td>保存(File System API 非対応時はダウンロード)</td></tr>
@@ -137,6 +146,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
  <span id="st-pos"></span>
  <span id="st-byte"></span>
  <span id="st-sel"></span>
+ <span id="st-cmp"></span>
  <span id="st-undo"></span>
  <span id="flash"></span>
 </div>
@@ -149,6 +159,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
  </div>
 </div>
 <input type="file" id="fileinput" hidden>
+<input type="file" id="cmpinput" hidden>
 <script>
 'use strict';
 /* ================= 定数・状態 ================= */
@@ -156,11 +167,13 @@ const BPR=16, ROWH=24, UNDO_MAX=200, MATCH_MAX=2000, MATCHSET_MAX=40000;
 const $=s=>document.querySelector(s);
 const viewport=$('#viewport'), scroller=$('#scroller'), rowsEl=$('#rows'),
  fnameEl=$('#fname'), fszEl=$('#fsz'),
- stPos=$('#st-pos'), stByte=$('#st-byte'), stSel=$('#st-sel'), stUndo=$('#st-undo'), flashEl=$('#flash'),
+ stPos=$('#st-pos'), stByte=$('#st-byte'), stSel=$('#st-sel'), stCmp=$('#st-cmp'), stUndo=$('#st-undo'), flashEl=$('#flash'),
  welcome=$('#welcome'), dropOverlay=$('#dropoverlay'),
  modal=$('#modal'), mtitle=$('#mtitle'), mbody=$('#mbody'), mok=$('#mok'), mcancel=$('#mcancel'),
  searchEl=$('#search'), searchModeEl=$('#searchmode'), gotoEl=$('#goto'), fileInput=$('#fileinput'),
- bUndo=$('#b-undo'), bRedo=$('#b-redo');
+ cmpInput=$('#cmpinput'),
+ bUndo=$('#b-undo'), bRedo=$('#b-redo'),
+ bDiffNext=$('#b-diffnext'), bDiffPrev=$('#b-diffprev'), bCmpClear=$('#b-cmpclear');
 
 let data=null, fileHandle=null, fileName='', fileType='';
 let size0=0, dirty=false;
@@ -168,6 +181,8 @@ let undoStack=[], redoStack=[];
 let cursor=0, selA=-1, selB=-1;
 let editing=null;
 let matchRanges=[], matchSet=new Set();
+let cmpData=null, cmpName='';
+let diffCount=0, diffFirst=-1;
 let modalOpen=false;
 let flashTimer=null;
 
@@ -204,6 +219,7 @@ function applyOp(start,before,after,keepSel=false){
  dirty=true;
  cursor=clamp(cursor);
  if(keepSel) clampSel(); else { selA=selB=-1; }
+ updateDiffStats();
 }
 function setData(off,val){
  if(!data||off<0||off>=data.length) return;
@@ -235,13 +251,13 @@ function undo(){
  const op=undoStack.pop(); if(!op) return;
  data=splice(op.start,op.after.length,op.before);
  redoStack.push(op);
- dirty=true; cursor=clamp(cursor); clampSel(); render();
+ dirty=true; cursor=clamp(cursor); clampSel(); updateDiffStats(); render();
 }
 function redo(){
  const op=redoStack.pop(); if(!op) return;
  data=splice(op.start,op.before.length,op.after);
  undoStack.push(op);
- dirty=true; cursor=clamp(cursor); clampSel(); render();
+ dirty=true; cursor=clamp(cursor); clampSel(); updateDiffStats(); render();
 }
 /* ================= 読み込み・保存 ================= */
 async function loadFile(file,handle){
@@ -255,6 +271,7 @@ async function loadFile(file,handle){
  undoStack=[]; redoStack=[]; cursor=0; selA=selB=-1;
  matchRanges=[]; matchSet=new Set(); dirty=false;
  viewport.scrollTop=0;
+ updateDiffStats();
  render();
  flash(`${file.name} を開きました (${data.length.toLocaleString()} バイト)`);
 }
@@ -263,6 +280,7 @@ function loadBytes(bytes,name,type){
  undoStack=[]; redoStack=[]; cursor=0; selA=selB=-1;
  matchRanges=[]; matchSet=new Set(); dirty=false;
  viewport.scrollTop=0;
+ updateDiffStats();
  render();
  flash(`${name} を開きました (${data.length} バイト)`);
 }
@@ -299,6 +317,70 @@ async function saveFile(){
  downloadBytes(data,fileName||'binary.bin');
  flash('ダウンロードしました: '+(fileName||'binary.bin'));
 }
+/* ================= ファイル比較 ================= */
+/* 同一オフセット同士を突き合わせる方式(挿入・削除によるズレは追従しません) */
+function diffAt(o){
+ if(!cmpData||!data||o<0||o>=data.length) return false;
+ if(o>=cmpData.length) return true;
+ return data[o]!==cmpData[o];
+}
+function updateDiffStats(){
+ if(!cmpData||!data){ diffCount=0; diffFirst=-1; return; }
+ const lim=Math.min(data.length,cmpData.length);
+ let n=0, first=-1;
+ for(let i=0;i<lim;i++){
+  if(data[i]!==cmpData[i]){ if(first<0) first=i; n++; }
+ }
+ if(data.length>lim){ if(first<0) first=lim; n+=data.length-lim; }
+ diffCount=n; diffFirst=first;
+}
+async function loadCompare(file){
+ if(!data) return flash('先に編集するファイルを開いてください');
+ let bytes;
+ try{
+  flash('比較ファイルを読み込み中…',60000);
+  bytes=new Uint8Array(await file.arrayBuffer());
+ }catch(e){ return flash('比較ファイルの読み込みに失敗: '+e.message); }
+ cmpData=bytes; cmpName=file.name;
+ updateDiffStats();
+ const extra=cmpData.length-data.length;
+ if(diffCount===0&&extra===0){ render(); return flash('完全に一致しています: '+cmpName); }
+ if(diffFirst>=0){ selA=selB=-1; cursor=clamp(diffFirst); scrollToCenter(cursor); }
+ render();
+ flash('比較: '+cmpName+' / 差分 '+diffCount.toLocaleString()+' バイト'
+  +(extra>0?' (比較側が '+extra.toLocaleString()+' バイト長い)':'')
+  +(diffFirst>=0?' / 最初の差分 0x'+hex(diffFirst,8):''));
+}
+async function openCompare(){
+ if(!data) return flash('先に編集するファイルを開いてください');
+ if(window.showOpenFilePicker){
+  try{
+   const [h]=await window.showOpenFilePicker({multiple:false});
+   await loadCompare(await h.getFile()); return;
+  }catch(e){ if(e && e.name==='AbortError') return; /* 以下 input にフォールスルー */ }
+ }
+ cmpInput.click();
+}
+function clearCompare(){
+ if(!cmpData) return flash('比較ファイルは読み込まれていません');
+ cmpData=null; cmpName=''; diffCount=0; diffFirst=-1;
+ render();
+ flash('比較を解除しました');
+}
+function gotoDiff(dir){
+ if(!cmpData) return flash('比較ファイルが読み込まれていません');
+ if(!data||!data.length) return;
+ const n=data.length;
+ for(let s=1;s<=n;s++){
+  const o=((cursor+dir*s)%n+n)%n;
+  if(!diffAt(o)) continue;
+  selA=selB=-1; cursor=o; scrollToCenter(o); render();
+  flash('差分 0x'+hex(o,8)+' / 編集側 0x'+hex(data[o],2)
+   +' / 比較側 '+(o<cmpData.length?'0x'+hex(cmpData[o],2):'(なし)'));
+  return;
+ }
+ flash('差分はありません');
+}
 /* ================= 描画 ================= */
 function render(){
  if(!data){
@@ -306,8 +388,9 @@ function render(){
   scroller.style.display='none';
   fnameEl.textContent='ファイル未読み込み';
   fszEl.textContent='';
-  stPos.textContent=''; stByte.textContent=''; stSel.textContent=''; stUndo.textContent='';
+  stPos.textContent=''; stByte.textContent=''; stSel.textContent=''; stCmp.textContent=''; stUndo.textContent='';
   bUndo.disabled=true; bRedo.disabled=true;
+  bDiffNext.disabled=true; bDiffPrev.disabled=true; bCmpClear.disabled=true;
   return;
  }
  welcome.style.display='none';
@@ -331,14 +414,20 @@ function render(){
  stPos.textContent='0x'+hex(cursor,8)+' ('+cursor.toLocaleString()+')';
  if(data.length){
   const v=data[cursor];
-  stByte.textContent='= 0x'+hex(v,2)+' ('+v+') '+(v>=0x20&&v<0x7f?'"'+String.fromCharCode(v)+'"':'(非表示)');
+  stByte.textContent='= 0x'+hex(v,2)+' ('+v+') '+(v>=0x20&&v<0x7f?'"'+String.fromCharCode(v)+'"':'(非表示)')
+   +(cmpData?' / 比較側 '+(cursor<cmpData.length?'0x'+hex(cmpData[cursor],2):'(なし)'):'');
  } else stByte.textContent='(空ファイル)';
  stSel.textContent=hasSel()
   ? '選択: '+(hi-lo+1)+' バイト (0x'+hex(lo,8)+'〜0x'+hex(hi,8)+')'
   : (matchRanges.length?'一致: '+matchRanges.length+(matchRanges.length>=MATCH_MAX?'+':'')+' 件':'');
+ stCmp.textContent=cmpData
+  ? '比較: '+cmpName+' / 差分 '+diffCount.toLocaleString()+' バイト'
+    +(cmpData.length!==data.length?' / 比較側 '+cmpData.length.toLocaleString()+' バイト':'')
+  : '';
  stUndo.textContent='履歴: '+undoStack.length+'/'+UNDO_MAX;
  bUndo.disabled=!undoStack.length;
  bRedo.disabled=!redoStack.length;
+ bDiffNext.disabled=bDiffPrev.disabled=bCmpClear.disabled=!cmpData;
 }
 function rowHtml(r,lo,hi){
  const off0=r*BPR;
@@ -351,7 +440,10 @@ function rowHtml(r,lo,hi){
    if(o===cursor) cls+=' cur';
    if(o>=lo&&o<=hi) cls+=' sel';
    if(matchSet.has(o)) cls+=' m';
-   h+='<span class="'+cls+'" data-off="'+o+'" data-kind="hex" title="0x'+hex(o,8)+' = 0x'+hex(v,2)+' ('+v+')">'+hex(v,2)+'</span>';
+   if(diffAt(o)) cls+=' d';
+   let tt='0x'+hex(o,8)+' = 0x'+hex(v,2)+' ('+v+')';
+   if(cmpData) tt+=' / 比較側 '+(o<cmpData.length?'0x'+hex(cmpData[o],2):'(なし)');
+   h+='<span class="'+cls+'" data-off="'+o+'" data-kind="hex" title="'+tt+'">'+hex(v,2)+'</span>';
   } else {
    h+='<span class="hc pad"></span>';
   }
@@ -366,6 +458,7 @@ function rowHtml(r,lo,hi){
    if(o===cursor) cls+=' cur';
    if(o>=lo&&o<=hi) cls+=' sel';
    if(matchSet.has(o)) cls+=' m';
+   if(diffAt(o)) cls+=' d';
    const ch=(v>=0x20&&v<0x7f)?String.fromCharCode(v):'·';
    const esc=ch.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
    h+='<span class="'+cls+'" data-off="'+o+'" data-kind="asc">'+esc+'</span>';
@@ -609,6 +702,7 @@ function keysTableHtml(){
  +'<tr><td>Delete / Backspace</td><td>選択範囲(または1バイト)を削除</td></tr>'
  +'<tr><td>16進文字 (0-9 A-F)</td><td>入力と同時に編集開始</td></tr>'
  +'<tr><td>F3 / Shift+F3</td><td>次 / 前の一致へ</td></tr>'
+ +'<tr><td>F6 / Shift+F6</td><td>次 / 前の差分へ(比較ファイル読み込み時)</td></tr>'
  +'<tr><td>Ctrl+Z / Ctrl+Y</td><td>元に戻す / やり直す</td></tr>'
  +'<tr><td>Ctrl+C / X / V</td><td>コピー(16進テキスト) / 切り取り / 貼り付け</td></tr>'
  +'<tr><td>Ctrl+A</td><td>全体選択</td></tr>'
@@ -784,6 +878,7 @@ window.addEventListener('keydown',e=>{
  else if(k==='Enter'||k==='F2'){ e.preventDefault(); startEdit(cursor,'hex'); }
  else if(k==='Delete'||k==='Backspace'){ e.preventDefault(); deleteSel(); }
  else if(k==='F3'){ e.preventDefault(); doSearch(e.shiftKey?-1:1); }
+ else if(k==='F6'){ e.preventDefault(); gotoDiff(e.shiftKey?-1:1); }
  else if(/^[0-9a-fA-F]$/.test(k)){ startEdit(cursor,'hex',k); }
 });
 $('#b-open').onclick=openFile;
@@ -801,6 +896,10 @@ $('#b-paste').onclick=pasteSel;
 $('#b-find').onclick=()=>doSearch(1);
 $('#b-findprev').onclick=()=>doSearch(-1);
 $('#b-goto').onclick=gotoOffset;
+$('#b-cmp').onclick=openCompare;
+$('#b-diffnext').onclick=()=>gotoDiff(1);
+$('#b-diffprev').onclick=()=>gotoDiff(-1);
+$('#b-cmpclear').onclick=clearCompare;
 $('#b-help').onclick=dlgHelp;
 $('#w-sample').onclick=()=>{ loadBytes(sampleBytes(),'sample-1x1.png','image/png'); };
 mcancel.onclick=closeModal;
@@ -813,6 +912,11 @@ fileInput.addEventListener('change',async()=>{
  const f=fileInput.files&&fileInput.files[0];
  if(f) await loadFile(f,null);
  fileInput.value='';
+});
+cmpInput.addEventListener('change',async()=>{
+ const f=cmpInput.files&&cmpInput.files[0];
+ if(f) await loadCompare(f);
+ cmpInput.value='';
 });
 searchEl.addEventListener('keydown',e=>{
  if(e.key==='Enter'){ e.preventDefault(); doSearch(1); }
