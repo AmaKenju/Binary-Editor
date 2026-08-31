@@ -75,48 +75,48 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
 </head>
 <body>
 <header>
- <div class="brand">🧬 バイナリヘクスエディタ</div>
+ <div class="brand">バイナリヘクスエディタ</div>
  <div class="fname" id="fname">ファイル未読み込み</div>
  <div class="sp"></div>
  <div class="fsz" id="fsz"></div>
 </header>
 <div class="toolbar">
- <button id="b-open" title="ファイルを開く">📂 開く</button>
- <button id="b-save" title="保存 / ダウンロード (Ctrl+S)">💾 保存</button>
+ <button id="b-open" title="ファイルを開く">開く</button>
+ <button id="b-save" title="保存 / ダウンロード (Ctrl+S)">保存</button>
  <span class="sep"></span>
- <button id="b-undo" title="元に戻す (Ctrl+Z)">↩ 元に戻す</button>
- <button id="b-redo" title="やり直す (Ctrl+Y)">↪ やり直す</button>
+ <button id="b-undo" title="元に戻す (Ctrl+Z)">元に戻す</button>
+ <button id="b-redo" title="やり直す (Ctrl+Y)">やり直す</button>
  <span class="sep"></span>
- <button id="b-ins" title="バイト列を挿入">＋ 挿入…</button>
- <button id="b-del" title="選択範囲(またはカーソル位置1バイト)を削除">－ 削除</button>
- <button id="b-fill" title="カーソル位置から塗りつぶし">🪣 塗りつぶし…</button>
- <button id="b-savesel" title="選択範囲をファイルとして保存">📦 選択を保存</button>
+ <button id="b-ins" title="バイト列を挿入">挿入…</button>
+ <button id="b-del" title="選択範囲(またはカーソル位置1バイト)を削除">削除</button>
+ <button id="b-fill" title="カーソル位置から塗りつぶし">塗りつぶし…</button>
+ <button id="b-savesel" title="選択範囲をファイルとして保存">選択を保存</button>
  <span class="sep"></span>
- <button id="b-copy" title="選択範囲を16進テキストでコピー (Ctrl+C)">⧉ コピー</button>
- <button id="b-cut" title="切り取り (Ctrl+X)">✂ 切り取り</button>
- <button id="b-paste" title="クリップボードを貼り付け (Ctrl+V)">📋 貼り付け</button>
+ <button id="b-copy" title="選択範囲を16進テキストでコピー (Ctrl+C)">コピー</button>
+ <button id="b-cut" title="切り取り (Ctrl+X)">切り取り</button>
+ <button id="b-paste" title="クリップボードを貼り付け (Ctrl+V)">貼り付け</button>
  <span class="sep"></span>
  <input id="search" placeholder="検索" size="16" title="16進 (DE AD) または テキスト">
  <select id="searchmode" title="検索モード">
   <option value="hex">16進</option>
   <option value="text">テキスト</option>
  </select>
- <button id="b-find" title="次を検索 (F3)">→ 次</button>
- <button id="b-findprev" title="前を検索 (Shift+F3)">← 前</button>
+ <button id="b-find" title="次を検索 (F3)">次</button>
+ <button id="b-findprev" title="前を検索 (Shift+F3)">前</button>
  <span class="sep"></span>
  <input id="goto" placeholder="0x00000000" size="12" title="移動先オフセット (16進)">
  <button id="b-goto" title="オフセットへ移動">移動</button>
  <span class="sep"></span>
- <button id="b-help" title="操作ガイド">？</button>
+ <button id="b-help" title="操作ガイド">ヘルプ</button>
 </div>
 <div id="viewport">
  <div id="welcome">
   <div class="wcard">
-   <h1>🧬 バイナリヘクスエディタ</h1>
+   <h1>バイナリヘクスエディタ</h1>
    <p>あらゆるファイル(画像・動画・実行ファイル・テキストなど)をブラウザ上で開いて、16進 / ASCII で直接編集できます。すべてローカル処理で、ファイルは外部に送信されません。</p>
    <div class="wbtns">
-    <button id="w-open">📂 ファイルを開く</button>
-    <button id="w-sample" class="secondary">サンプル(1×1 PNG)を開く</button>
+    <button id="w-open">ファイルを開く</button>
+    <button id="w-sample" class="secondary">サンプル(1x1 PNG)を開く</button>
    </div>
    <p class="hint">※ ウィンドウにファイルをドラッグ&amp;ドロップしても開けます。Chrome / Edge では「保存」すると、開いたファイルそのものを書き換えることができます。</p>
    <table class="keys">
@@ -140,10 +140,10 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
  <span id="st-undo"></span>
  <span id="flash"></span>
 </div>
-<div id="dropoverlay"><div>📥 ファイルをドロップして開く</div></div>
+<div id="dropoverlay"><div>ファイルをドロップして開く</div></div>
 <div id="modal" hidden>
  <div class="mcard">
-  <div class="mhead"><span id="mtitle"></span><button id="mclose" title="閉じる">✕</button></div>
+  <div class="mhead"><span id="mtitle"></span><button id="mclose" title="閉じる">閉じる</button></div>
   <div id="mbody"></div>
   <div class="mfoot"><button id="mcancel">キャンセル</button><button id="mok" class="primary">OK</button></div>
  </div>
@@ -213,21 +213,23 @@ function setData(off,val){
 }
 function insertAt(start,bytes){ applyOp(start,new Uint8Array(0),bytes); }
 function deleteAt(start,len){
- if(!data||len<=0) return;
+ if(!data||len<=0) return 0;
  len=Math.min(len,data.length-start);
- if(len<=0) return;
+ if(len<=0) return 0;
  applyOp(start,data.subarray(start,start+len),new Uint8Array(0));
  cursor=clamp(Math.min(start,data.length-1));
+ return len;
 }
 function fillAt(start,len,pattern){
- if(!data||len<=0||!pattern.length) return;
+ if(!data||len<=0||!pattern.length) return 0;
  len=Math.min(len,data.length-start);
- if(len<=0) return;
+ if(len<=0) return 0;
  const before=data.subarray(start,start+len);
  const after=new Uint8Array(len);
  for(let i=0;i<len;i++) after[i]=pattern[i%pattern.length];
  applyOp(start,before,after);
  cursor=clamp(start);
+ return len;
 }
 function undo(){
  const op=undoStack.pop(); if(!op) return;
@@ -292,7 +294,7 @@ async function saveFile(){
    await w.close();
    dirty=false; render();
    flash('保存しました(上書き)'); return;
-  }catch(e){ flash('直接保存に失敗 → ダウンロードします'); }
+  }catch(e){ flash('直接保存に失敗したためダウンロードします'); }
  }
  downloadBytes(data,fileName||'binary.bin');
  flash('ダウンロードしました: '+(fileName||'binary.bin'));
@@ -333,7 +335,7 @@ function render(){
  } else stByte.textContent='(空ファイル)';
  stSel.textContent=hasSel()
   ? '選択: '+(hi-lo+1)+' バイト (0x'+hex(lo,8)+'〜0x'+hex(hi,8)+')'
-  : (matchRanges.length?'一致: '+matchRanges.length+' 件':'');
+  : (matchRanges.length?'一致: '+matchRanges.length+(matchRanges.length>=MATCH_MAX?'+':'')+' 件':'');
  stUndo.textContent='履歴: '+undoStack.length+'/'+UNDO_MAX;
  bUndo.disabled=!undoStack.length;
  bRedo.disabled=!redoStack.length;
@@ -396,7 +398,6 @@ function startEdit(o,kind,init){
  const c=cellEl(o,kind);
  if(!c){ ensureVisible(o); render(); return; }
  editing={off:o,kind,cell:c};
- c.classList.add('edit');
  const inp=document.createElement('input');
  inp.className='hexin'+(kind==='asc'?' ascin':'');
  inp.spellcheck=false; inp.autocapitalize='off'; inp.autocomplete='off';
@@ -519,7 +520,7 @@ function doSearch(dir){
  selA=m; selB=m+q.length-1; cursor=m;
  scrollToCenter(m);
  render();
- flash('一致 '+(idx+1)+' / '+matchRanges.length+' @ 0x'+hex(m,8));
+ flash('一致 '+(idx+1)+' / '+matchRanges.length+(matchRanges.length>=MATCH_MAX?'+':'')+' @ 0x'+hex(m,8));
 }
 /* ================= コピー / 貼り付け ================= */
 function selRange(){
@@ -569,17 +570,18 @@ function deleteSel(){
  if(!data) return flash('ファイル未読み込み');
  const a=selRange()[0], b=selRange()[1];
  const n=b-a+1;
- deleteAt(a,n);
+ const done=deleteAt(a,n);
  render();
- flash(n+' バイトを削除しました');
+ flash(done+' バイトを削除しました');
 }
 function saveSel(){
  if(!data) return flash('ファイル未読み込み');
  const a=selRange()[0], b=selRange()[1];
  const bytes=data.subarray(a,b+1);
- const base=(fileName||'binary').replace(/\.[^.]+$/,'');
- const m=fileName.match(/\.[^.]+$/);
- const ext=m?m[0]:'.bin';
+ const name=fileName||'binary';
+ const dot=name.lastIndexOf('.');
+ const base=dot>0?name.slice(0,dot):name;
+ const ext=dot>0?name.slice(dot):'.bin';
  downloadBytes(bytes,base+'_sel_0x'+hex(a,8)+ext);
  flash(bytes.length+' バイトをファイルとして保存しました');
 }
@@ -624,7 +626,7 @@ function dlgInsert(){
   '<label>挿入位置: <b>0x'+hex(at,8)+'</b>'+(hasSel()?' (選択範囲 '+(selHi()-selLo()+1)+' バイトは置換されます)':'')+'</label>'
   +'<label>バイト列(16進、スペース区切り可)</label>'
   +'<textarea id="mi" rows="3" spellcheck="false">DE AD BE EF</textarea>'
-  +'<p class="hint">例: 「48 65 6C 6C 6F」 → "Hello" が挿入されます。空欄はキャンセル扱い。</p>',
+  +'<p class="hint">例: 「48 65 6C 6C 6F」は "Hello" として挿入されます。空欄はキャンセル扱い。</p>',
   '挿入',
   ()=>{
    const s=$('#mi').value.trim();
@@ -653,9 +655,9 @@ function dlgDelete(){
    const start=hasSel()?selLo():cursor;
    const n=hasSel()?(selHi()-selLo()+1):Math.max(1,parseInt($('#md').value,10)||1);
    if(n<=0) return false;
-   deleteAt(start,n);
+   const done=deleteAt(start,n);
    render();
-   flash(n+' バイトを削除しました');
+   flash(done+' バイトを削除しました');
    return true;
   });
 }
@@ -671,20 +673,18 @@ function dlgFill(){
    const len=Math.max(1,parseInt($('#mf-len').value,10)||1);
    const pat=parseHex($('#mf-pat').value);
    if(!pat||!pat.length){ flash('16進数が不正です'); return false; }
-   fillAt(cursor,len,pat);
+   const done=fillAt(cursor,len,pat);
    render();
-   flash(len+' バイトを塗りつぶしました');
+   flash(done+' バイトを塗りつぶしました');
    return true;
   });
 }
 function gotoOffset(){
  if(!data) return flash('ファイル未読み込み');
- const t=gotoEl.value.trim();
+ const t=gotoEl.value.trim().replace(/^0x/i,'');
  if(!t) return;
- let off;
- if(/^0x/i.test(t)) off=parseInt(t,16);
- else if(/[a-fA-F]/.test(t)) off=parseInt(t,16);
- else off=parseInt(t,10);
+ if(!/^[0-9a-fA-F]+$/.test(t)){ flash('16進数の形式が不正です'); return; }
+ const off=parseInt(t,16);
  if(isNaN(off)||off<0||off>=data.length){ flash('オフセットが範囲外です'); return; }
  selA=selB=-1;
  cursor=off;
@@ -700,6 +700,7 @@ viewport.addEventListener('mousedown',e=>{
  e.preventDefault();
  const off=+c.dataset.off;
  if(e.shiftKey){
+  if(editing) finishEdit(true);
   const anchor=hasSel()?selA:cursor;
   selA=anchor; selB=off;
   ensureVisible(off);
