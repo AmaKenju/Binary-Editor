@@ -70,6 +70,20 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
 #mbody input,#mbody textarea{width:100%;background:#0d1017;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 9px;font:13px ui-monospace,Consolas,monospace}
 #mbody textarea{resize:vertical}
 #mbody input:focus,#mbody textarea:focus{outline:none;border-color:var(--acc)}
+.mcard.wide{width:min(820px,95vw)}
+.mcard.wide #mbody{max-height:64vh;overflow:auto}
+.rep{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+.rep th,.rep td{padding:4px 7px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.rep th{color:var(--dim);font-weight:600;white-space:nowrap}
+.rep td.o{font-family:ui-monospace,Consolas,monospace;color:var(--acc);white-space:nowrap;cursor:pointer}
+.rep td.o:hover{text-decoration:underline}
+.verdict{padding:10px 12px;border-radius:8px;margin:2px 0 12px;font-size:13px;line-height:1.6}
+.verdict.good{background:rgba(63,185,80,.12);border:1px solid var(--ok);color:#9ff0ab}
+.verdict.warn{background:rgba(210,153,34,.12);border:1px solid #d29922;color:#f0d68a}
+.verdict.bad{background:rgba(248,81,73,.12);border:1px solid var(--err);color:#ffb4b0}
+.sevE{color:var(--err);font-weight:700;white-space:nowrap}
+.sevW{color:#d29922;white-space:nowrap}
+.rsec{margin:16px 0 2px;font-weight:700;font-size:13px}
 .mfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .mfoot button{background:#232836;border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:7px 16px;cursor:pointer;font-size:13px}
 .mfoot button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
@@ -114,6 +128,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
  <button id="b-diffnext" title="次の差分へ (F6)">次の差分</button>
  <button id="b-diffprev" title="前の差分へ (Shift+F6)">前の差分</button>
  <button id="b-cmpclear" title="比較を解除">比較解除</button>
+ <button id="b-diag" title="ファイル形式の構造を検査し、破損個所を推定">破損診断</button>
  <span class="sep"></span>
  <button id="b-help" title="操作ガイド">ヘルプ</button>
 </div>
@@ -134,6 +149,7 @@ header{display:flex;align-items:center;gap:12px;padding:8px 14px;background:var(
     <tr><td>Delete / Backspace</td><td>選択範囲(または1バイト)を削除</td></tr>
     <tr><td>F3 / Shift+F3</td><td>次 / 前の一致へ(ツールバーの検索欄使用)</td></tr>
     <tr><td>比較… / F6</td><td>2つ目のファイルを読み込み、異なるバイトを赤く表示。F6 で差分間を移動</td></tr>
+    <tr><td>破損診断</td><td>PNG/JPEG/ZIP などの構造を検査し、破損個所を推定(比較ファイルがあれば差分と対応付け)</td></tr>
     <tr><td>Ctrl + Z / Y</td><td>元に戻す / やり直す</td></tr>
     <tr><td>Ctrl + C / X / V</td><td>コピー(16進テキスト) / 切り取り / 貼り付け</td></tr>
     <tr><td>Ctrl + S</td><td>保存(File System API 非対応時はダウンロード)</td></tr>
@@ -678,11 +694,376 @@ function saveSel(){
  downloadBytes(bytes,base+'_sel_0x'+hex(a,8)+ext);
  flash(bytes.length+' バイトをファイルとして保存しました');
 }
+/* ================= 形式解析・破損診断 ================= */
+function escHtml(s){
+ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+let crcTable=null;
+function crc32(buf,start,end){
+ if(!crcTable){
+  crcTable=new Int32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); crcTable[n]=c; }
+ }
+ let c=-1;
+ for(let i=start;i<end;i++) c=crcTable[(c^buf[i])&0xff]^(c>>>8);
+ return (c^-1)>>>0;
+}
+function u32be(b,p){ return ((b[p]<<24)|(b[p+1]<<16)|(b[p+2]<<8)|b[p+3])>>>0; }
+function u32le(b,p){ return (b[p]|(b[p+1]<<8)|(b[p+2]<<16)|(b[p+3]<<24))>>>0; }
+function u16le(b,p){ return b[p]|(b[p+1]<<8); }
+function extOf(name){ const m=String(name||'').match(/\.([^.\\/]+)$/); return m?m[1].toLowerCase():''; }
+function sigAt(b,sig,off){
+ off=off||0;
+ if(off+sig.length>b.length) return false;
+ for(let i=0;i<sig.length;i++) if(b[off+i]!==sig[i]) return false;
+ return true;
+}
+function utf8Str(b,p,len){
+ try{ return new TextDecoder().decode(b.subarray(p,Math.min(p+len,b.length))); }
+ catch(e){ let s=''; for(let i=0;i<len&&p+i<b.length;i++) s+=String.fromCharCode(b[p+i]); return s; }
+}
+const FMT_LABEL={png:'PNG',jpeg:'JPEG',gif:'GIF',bmp:'BMP',riff:'RIFF (WAV/AVI/WebP)',
+ pdf:'PDF',zip:'ZIP系 (zip/docx/xlsx/pptx/jar など)',gzip:'GZIP'};
+/* 拡張子から形式を引く表。署名が壊れているファイルでも診断できるようにするため */
+const EXT_FMT={png:'png',jpg:'jpeg',jpeg:'jpeg',jpe:'jpeg',jfif:'jpeg',gif:'gif',bmp:'bmp',dib:'bmp',
+ wav:'riff',avi:'riff',webp:'riff',pdf:'pdf',gz:'gzip',tgz:'gzip',
+ zip:'zip',docx:'zip',xlsx:'zip',pptx:'zip',jar:'zip',apk:'zip',epub:'zip',odt:'zip',ods:'zip',odp:'zip'};
+function magicFormat(b){
+ if(sigAt(b,[0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A])) return 'png';
+ if(b.length>=3&&b[0]===0xFF&&b[1]===0xD8) return 'jpeg';
+ if(sigAt(b,[0x47,0x49,0x46,0x38])) return 'gif';
+ if(sigAt(b,[0x52,0x49,0x46,0x46])) return 'riff';
+ if(sigAt(b,[0x25,0x50,0x44,0x46])) return 'pdf';
+ if(b.length>=4&&b[0]===0x50&&b[1]===0x4B&&(b[2]===3||b[2]===5||b[2]===7)) return 'zip';
+ if(b.length>=3&&b[0]===0x1F&&b[1]===0x8B) return 'gzip';
+ if(b.length>=2&&b[0]===0x42&&b[1]===0x4D) return 'bmp';
+ return '';
+}
+function detectFormat(b,name){
+ const m=magicFormat(b);
+ if(m) return {id:m,byMagic:true};
+ const e=EXT_FMT[extOf(name)];
+ if(e) return {id:e,byMagic:false};
+ return {id:'',byMagic:false};
+}
+/* --- 各形式の構造走査。regions は差分位置の意味づけ、problems は破損の根拠 --- */
+function scanPng(b){
+ const regions=[],problems=[];
+ if(!sigAt(b,[0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]))
+  problems.push({off:0,sev:'err',msg:'PNG 署名が壊れています'});
+ regions.push({start:0,end:8,name:'PNG 署名'});
+ let p=8,sawIHDR=false,sawIEND=false;
+ while(p+8<=b.length){
+  const len=u32be(b,p);
+  const type=String.fromCharCode(b[p+4],b[p+5],b[p+6],b[p+7]);
+  if(!/^[A-Za-z]{4}$/.test(type)){
+   problems.push({off:p+4,sev:'err',msg:'チャンク型が不正です(構造が破損しています)'});
+   regions.push({start:p,end:b.length,name:'不明領域'});
+   break;
+  }
+  const end=p+12+len;
+  if(end>b.length||end<p){
+   problems.push({off:p,sev:'err',msg:type+' チャンクの長さ('+len.toLocaleString()+' バイト)がファイル範囲を超えています(切り詰め or 破損)'});
+   regions.push({start:p,end:b.length,name:type+' チャンク (不完全)'});
+   break;
+  }
+  const stored=u32be(b,end-4), calc=crc32(b,p+4,end-4);
+  if(stored!==calc)
+   problems.push({off:p,sev:'err',msg:type+' チャンクの CRC 不一致 (格納値 0x'+hex(stored,8)+' / 実際 0x'+hex(calc,8)+') このチャンクの中身は破損しています'});
+  regions.push({start:p,end,name:type+' チャンク'});
+  if(type==='IHDR') sawIHDR=true;
+  if(type==='IEND'){ sawIEND=true; p=end; break; }
+  p=end;
+ }
+ if(!sawIHDR) problems.push({off:8,sev:'err',msg:'IHDR チャンクがありません'});
+ if(!sawIEND) problems.push({off:Math.max(0,b.length-1),sev:'err',msg:'IEND チャンクがありません(ファイルが途中で切れています)'});
+ else if(p<b.length) problems.push({off:p,sev:'warn',msg:'IEND の後に余分なデータが '+(b.length-p).toLocaleString()+' バイトあります'});
+ return {regions,problems};
+}
+function jpegSegName(m){
+ if(m===0xC0) return 'SOF0 (ベースライン)';
+ if(m===0xC2) return 'SOF2 (プログレッシブ)';
+ if(m===0xC4) return 'DHT (ハフマン表)';
+ if(m===0xDB) return 'DQT (量子化表)';
+ if(m===0xDA) return 'SOS (スキャン開始)';
+ if(m===0xDD) return 'DRI';
+ if(m>=0xE0&&m<=0xEF) return 'APP'+(m-0xE0)+' (メタデータ)';
+ if(m===0xFE) return 'COM (コメント)';
+ return 'マーカー FF'+hex(m,2);
+}
+function scanJpeg(b){
+ const regions=[],problems=[];
+ if(!(b[0]===0xFF&&b[1]===0xD8)) problems.push({off:0,sev:'err',msg:'SOI マーカー (FFD8) がありません'});
+ regions.push({start:0,end:2,name:'SOI'});
+ let p=2,sawEOI=false;
+ while(p+1<b.length){
+  if(b[p]!==0xFF){ problems.push({off:p,sev:'err',msg:'マーカー位置に FF がありません(構造が破損しています)'}); break; }
+  while(p+1<b.length&&b[p+1]===0xFF) p++;
+  if(p+1>=b.length) break;
+  const m=b[p+1];
+  if(m===0xD9){ regions.push({start:p,end:p+2,name:'EOI (終端)'}); sawEOI=true; p+=2; break; }
+  if(m===0x01||(m>=0xD0&&m<=0xD7)){ regions.push({start:p,end:p+2,name:jpegSegName(m)}); p+=2; continue; }
+  if(p+4>b.length){ problems.push({off:p,sev:'err',msg:'セグメント長が読めません(切り詰め)'}); break; }
+  const len=(b[p+2]<<8)|b[p+3];
+  if(len<2){ problems.push({off:p+2,sev:'err',msg:'セグメント長が不正です'}); break; }
+  const end=p+2+len;
+  if(end>b.length){
+   problems.push({off:p,sev:'err',msg:jpegSegName(m)+' がファイル範囲を超えています(切り詰め or 破損)'});
+   regions.push({start:p,end:b.length,name:jpegSegName(m)+' (不完全)'});
+   break;
+  }
+  regions.push({start:p,end,name:jpegSegName(m)});
+  if(m===0xDA){
+   let q=end;
+   while(q+1<b.length&&!(b[q]===0xFF&&b[q+1]!==0x00&&!(b[q+1]>=0xD0&&b[q+1]<=0xD7))) q++;
+   regions.push({start:end,end:Math.min(q,b.length),name:'圧縮画像データ'});
+   p=q; continue;
+  }
+  p=end;
+ }
+ if(!sawEOI) problems.push({off:Math.max(0,b.length-1),sev:'err',msg:'EOI マーカー (FFD9) がありません(ファイルが途中で切れています)'});
+ return {regions,problems};
+}
+function scanGif(b){
+ const regions=[],problems=[];
+ if(!(sigAt(b,[0x47,0x49,0x46,0x38])&&(b[4]===0x37||b[4]===0x39)&&b[5]===0x61))
+  problems.push({off:0,sev:'err',msg:'GIF 署名が不正です'});
+ regions.push({start:0,end:Math.min(13,b.length),name:'ヘッダ + 論理画面記述子'});
+ if(b.length<14){ problems.push({off:0,sev:'err',msg:'GIF としては短すぎます'}); return {regions,problems}; }
+ if(b[b.length-1]!==0x3B)
+  problems.push({off:b.length-1,sev:'err',msg:'終端バイト (0x3B) がありません(ファイルが途中で切れています)'});
+ else regions.push({start:b.length-1,end:b.length,name:'終端バイト'});
+ return {regions,problems};
+}
+function scanBmp(b){
+ const regions=[],problems=[];
+ regions.push({start:0,end:Math.min(14,b.length),name:'BITMAPFILEHEADER'});
+ if(!(b[0]===0x42&&b[1]===0x4D)) problems.push({off:0,sev:'err',msg:'BM 署名がありません(先頭が破損しています)'});
+ if(b.length<26){ problems.push({off:0,sev:'err',msg:'BMP としては短すぎます'}); return {regions,problems}; }
+ const declared=u32le(b,2);
+ if(declared!==b.length)
+  problems.push({off:2,sev:declared>b.length?'err':'warn',
+   msg:'ヘッダ記載のファイルサイズ '+declared.toLocaleString()+' バイトが実際の '+b.length.toLocaleString()+' バイトと一致しません'+(declared>b.length?'(切り詰められています)':'')});
+ const hdrSize=u32le(b,14);
+ regions.push({start:14,end:Math.min(14+hdrSize,b.length),name:'DIB ヘッダ'});
+ const dataOff=u32le(b,10);
+ if(dataOff>=b.length) problems.push({off:10,sev:'err',msg:'画素データ開始位置がファイル範囲外です'});
+ else regions.push({start:dataOff,end:b.length,name:'画素データ'});
+ return {regions,problems};
+}
+function scanRiff(b){
+ const regions=[],problems=[];
+ if(!sigAt(b,[0x52,0x49,0x46,0x46])) problems.push({off:0,sev:'err',msg:'RIFF 署名がありません(先頭が破損しています)'});
+ if(b.length<12){ problems.push({off:0,sev:'err',msg:'RIFF ヘッダが不完全です'}); return {regions,problems}; }
+ regions.push({start:0,end:12,name:'RIFF ヘッダ ('+utf8Str(b,8,4)+')'});
+ const declared=u32le(b,4)+8;
+ if(declared!==b.length)
+  problems.push({off:4,sev:declared>b.length?'err':'warn',
+   msg:'RIFF 記載サイズ '+declared.toLocaleString()+' バイトが実際の '+b.length.toLocaleString()+' バイトと一致しません'+(declared>b.length?'(切り詰められています)':'')});
+ let p=12;
+ while(p+8<=b.length){
+  const id=utf8Str(b,p,4), len=u32le(b,p+4);
+  const end=p+8+len+(len&1);
+  if(p+8+len>b.length||end<p){
+   problems.push({off:p,sev:'err',msg:'"'+id+'" チャンクの長さがファイル範囲を超えています(切り詰め or 破損)'});
+   regions.push({start:p,end:b.length,name:'"'+id+'" チャンク (不完全)'});
+   break;
+  }
+  regions.push({start:p,end:Math.min(end,b.length),name:'"'+id+'" チャンク'});
+  p=end;
+ }
+ return {regions,problems};
+}
+function scanPdf(b){
+ const regions=[],problems=[];
+ regions.push({start:0,end:Math.min(8,b.length),name:'PDF ヘッダ'});
+ if(!sigAt(b,[0x25,0x50,0x44,0x46])) problems.push({off:0,sev:'err',msg:'%PDF ヘッダがありません'});
+ let found=-1;
+ const lim=Math.max(0,b.length-2048);
+ for(let i=b.length-5;i>=lim;i--){
+  if(b[i]===0x25&&b[i+1]===0x25&&b[i+2]===0x45&&b[i+3]===0x4F&&b[i+4]===0x46){ found=i; break; }
+ }
+ if(found<0) problems.push({off:Math.max(0,b.length-1),sev:'err',msg:'末尾に %%EOF がありません(ファイルが途中で切れています)'});
+ else regions.push({start:found,end:Math.min(found+5,b.length),name:'%%EOF (終端)'});
+ return {regions,problems};
+}
+function scanZip(b){
+ const regions=[],problems=[];
+ if(!(b[0]===0x50&&b[1]===0x4B))
+  problems.push({off:0,sev:'err',msg:'先頭が PK 署名ではありません(先頭が破損しています)'});
+ let eocd=-1;
+ const lim=Math.max(0,b.length-66000);
+ for(let i=b.length-22;i>=lim;i--){
+  if(b[i]===0x50&&b[i+1]===0x4B&&b[i+2]===0x05&&b[i+3]===0x06){ eocd=i; break; }
+ }
+ if(eocd<0){
+  problems.push({off:Math.max(0,b.length-1),sev:'err',msg:'終端レコード (EOCD) が見つかりません(切り詰め or 破損)'});
+  return {regions,problems};
+ }
+ regions.push({start:eocd,end:Math.min(eocd+22,b.length),name:'EOCD (終端レコード)'});
+ const nEnt=u16le(b,eocd+10), cdSize=u32le(b,eocd+12), cdOff=u32le(b,eocd+16);
+ if(cdOff+cdSize>b.length){
+  problems.push({off:eocd+16,sev:'err',msg:'中央ディレクトリの位置/サイズがファイル範囲を超えています(破損)'});
+  return {regions,problems};
+ }
+ regions.push({start:cdOff,end:cdOff+cdSize,name:'中央ディレクトリ ('+nEnt+' エントリ)'});
+ let p=cdOff,i=0;
+ while(i<nEnt&&p+46<=cdOff+cdSize){
+  if(!(b[p]===0x50&&b[p+1]===0x4B&&b[p+2]===0x01&&b[p+3]===0x02)){
+   problems.push({off:p,sev:'err',msg:'中央ディレクトリのエントリ署名が不正です(破損)'});
+   break;
+  }
+  const nl=u16le(b,p+28), el=u16le(b,p+30), cl=u16le(b,p+32), lho=u32le(b,p+42);
+  const nm=utf8Str(b,p+46,nl);
+  if(lho+4>b.length||!(b[lho]===0x50&&b[lho+1]===0x4B&&b[lho+2]===0x03&&b[lho+3]===0x04))
+   problems.push({off:Math.min(lho,b.length-1),sev:'err',msg:'"'+nm+'" のローカルヘッダが見つかりません(破損)'});
+  else regions.push({start:lho,end:Math.min(lho+30+nl,b.length),name:'エントリ "'+nm+'" のヘッダ'});
+  p+=46+nl+el+cl; i++;
+ }
+ if(i<nEnt) problems.push({off:Math.min(p,Math.max(0,b.length-1)),sev:'err',msg:'中央ディレクトリのエントリ数が宣言値 ('+nEnt+') に達していません(破損)'});
+ return {regions,problems};
+}
+function scanGzip(b){
+ const regions=[],problems=[];
+ regions.push({start:0,end:Math.min(10,b.length),name:'GZIP ヘッダ'});
+ if(!(b[0]===0x1F&&b[1]===0x8B)) problems.push({off:0,sev:'err',msg:'GZIP 署名 (1F 8B) がありません(先頭が破損しています)'});
+ if(b.length<18){ problems.push({off:0,sev:'err',msg:'GZIP としては短すぎます(切り詰め)'}); return {regions,problems}; }
+ if(b[2]!==8) problems.push({off:2,sev:'warn',msg:'圧縮方式が deflate ではありません'});
+ regions.push({start:b.length-8,end:b.length,name:'CRC32 + 展開後サイズ'});
+ return {regions,problems};
+}
+function scanStructure(b,name){
+ const f=detectFormat(b,name);
+ let res;
+ if(f.id==='png') res=scanPng(b);
+ else if(f.id==='jpeg') res=scanJpeg(b);
+ else if(f.id==='gif') res=scanGif(b);
+ else if(f.id==='bmp') res=scanBmp(b);
+ else if(f.id==='riff') res=scanRiff(b);
+ else if(f.id==='pdf') res=scanPdf(b);
+ else if(f.id==='zip') res=scanZip(b);
+ else if(f.id==='gzip') res=scanGzip(b);
+ else res={regions:[],problems:[],unknown:true};
+ res.format=f.id;
+ res.byMagic=f.byMagic;
+ res.errCount=res.problems.filter(p=>p.sev==='err').length;
+ return res;
+}
+/* --- 差分のまとまりと性質 --- */
+function diffRuns(a,b,cap){
+ const runs=[], n=Math.max(a.length,b.length);
+ let s=-1;
+ for(let i=0;i<n;i++){
+  const d=(i<a.length?a[i]:-1)!==(i<b.length?b[i]:-2);
+  if(d&&s<0) s=i;
+  else if(!d&&s>=0){ runs.push({start:s,end:i}); s=-1; if(runs.length>=cap) return runs; }
+ }
+ if(s>=0) runs.push({start:s,end:n});
+ return runs;
+}
+function allVal(arr,st,en,v){
+ for(let i=st;i<en&&i<arr.length;i++) if(arr[i]!==v) return false;
+ return true;
+}
+function runNature(st,en){
+ if(st>=data.length) return '編集側にデータがありません(比較側の方が長い)';
+ if(st>=cmpData.length) return '比較側にデータがありません(編集側の方が長い)';
+ const zA=allVal(data,st,en,0), zB=allVal(cmpData,st,en,0);
+ if(zA&&!zB) return '編集側が 0x00 で埋まっています(ゼロ埋め破損の典型)';
+ if(zB&&!zA) return '比較側が 0x00 で埋まっています(ゼロ埋め破損の典型)';
+ const fA=allVal(data,st,en,0xFF), fB=allVal(cmpData,st,en,0xFF);
+ if(fA&&!fB) return '編集側が 0xFF で埋まっています';
+ if(fB&&!fA) return '比較側が 0xFF で埋まっています';
+ return '';
+}
+function regionAt(regions,off){
+ let best=null;
+ for(const r of regions) if(off>=r.start&&off<r.end) best=r;
+ return best;
+}
+/* --- 診断レポート --- */
+function fmtName(res){
+ if(res.unknown) return '判別不能';
+ return (FMT_LABEL[res.format]||res.format)+(res.byMagic?'':' (拡張子から推定)');
+}
+function problemsHtml(res,label){
+ if(res.unknown)
+  return '<div class="rsec">'+escHtml(label)+'</div><p class="hint">形式を判別できないため、構造による破損チェックは行えません。</p>';
+ if(!res.problems.length)
+  return '<div class="rsec">'+escHtml(label)+'</div><p class="hint">構造上の異常は見つかりませんでした。</p>';
+ let h='<div class="rsec">'+escHtml(label)+' の構造異常 ('+res.problems.length+' 件)</div>'
+  +'<table class="rep"><tr><th>オフセット</th><th>種別</th><th>内容</th></tr>';
+ for(const p of res.problems.slice(0,50))
+  h+='<tr><td class="o" data-jump="'+p.off+'">0x'+hex(p.off,8)+'</td><td>'
+   +(p.sev==='err'?'<span class="sevE">重大</span>':'<span class="sevW">注意</span>')
+   +'</td><td>'+escHtml(p.msg)+'</td></tr>';
+ h+='</table>';
+ if(res.problems.length>50) h+='<p class="hint">(先頭 50 件のみ表示)</p>';
+ return h;
+}
+function diagnose(){
+ if(!data) return flash('ファイル未読み込み');
+ const A=scanStructure(data,fileName);
+ const B=cmpData?scanStructure(cmpData,cmpName):null;
+ const eA=extOf(fileName), eB=cmpData?extOf(cmpName):'';
+ let h='';
+ /* 判定 */
+ let cls='good', verdict='';
+ if(!B){
+  if(A.unknown){ cls='warn'; verdict='形式を判別できませんでした。比較ファイルを読み込むと、差分から破損箇所を絞り込めます。'; }
+  else if(A.errCount){ cls='bad'; verdict=fmtName(A)+' として構造に異常があります。このファイルは破損しています。'; }
+  else{ cls='good'; verdict=fmtName(A)+' として構造上の異常は見つかりませんでした。'; }
+ } else {
+  if(eA&&eB&&eA!==eB){ cls='warn'; verdict='拡張子が異なります (.'+escHtml(eA)+' と .'+escHtml(eB)+')。同じ形式同士で比較してください。'; }
+  else if(!A.unknown&&!B.unknown&&A.format!==B.format){ cls='warn'; verdict='ファイル形式が異なります ('+fmtName(A)+' と '+fmtName(B)+')。比較結果は参考になりません。'; }
+  else if(A.errCount&&!B.errCount){ cls='bad'; verdict='編集側 ('+escHtml(fileName)+') が破損しています。比較側は構造上正常なので、下記の差分箇所が破損個所と考えられます。'; }
+  else if(!A.errCount&&B.errCount){ cls='bad'; verdict='比較側 ('+escHtml(cmpName)+') が破損しています。編集側は構造上正常です。'; }
+  else if(A.errCount&&B.errCount){ cls='bad'; verdict='両方のファイルに構造異常があります。'; }
+  else if(diffCount||data.length!==cmpData.length){ cls='warn'; verdict='どちらも構造上は正常です。差分は内容の違いによるものと考えられ、破損とは断定できません。'; }
+  else{ cls='good'; verdict='2つのファイルは完全に一致し、構造上の異常もありません。'; }
+ }
+ h+='<div class="verdict '+cls+'">'+verdict+'</div>';
+ /* ファイル情報 */
+ h+='<table class="rep"><tr><th></th><th>ファイル</th><th>形式</th><th>サイズ</th><th>構造異常</th></tr>'
+  +'<tr><td>編集側</td><td>'+escHtml(fileName||'(名称なし)')+'</td><td>'+escHtml(fmtName(A))+'</td><td>'
+  +data.length.toLocaleString()+' バイト</td><td>'+(A.unknown?'-':A.errCount+' 件')+'</td></tr>';
+ if(B) h+='<tr><td>比較側</td><td>'+escHtml(cmpName)+'</td><td>'+escHtml(fmtName(B))+'</td><td>'
+  +cmpData.length.toLocaleString()+' バイト</td><td>'+(B.unknown?'-':B.errCount+' 件')+'</td></tr>';
+ h+='</table>';
+ /* 構造異常の詳細 */
+ h+=problemsHtml(A,'編集側');
+ if(B) h+=problemsHtml(B,'比較側');
+ /* 差分の分布 */
+ if(B){
+  const runs=diffRuns(data,cmpData,200);
+  if(!runs.length) h+='<div class="rsec">差分</div><p class="hint">2つのファイルは完全に一致しています。</p>';
+  else{
+   h+='<div class="rsec">差分の分布 ('+runs.length.toLocaleString()+(runs.length>=200?'+':'')+' 箇所)</div>'
+    +'<table class="rep"><tr><th>開始</th><th>長さ</th><th>構造上の位置(編集側)</th><th>所見</th></tr>';
+   for(const r of runs){
+    const reg=regionAt(A.regions,r.start);
+    h+='<tr><td class="o" data-jump="'+r.start+'">0x'+hex(r.start,8)+'</td><td>'
+     +(r.end-r.start).toLocaleString()+'</td><td>'+escHtml(reg?reg.name:'(不明)')+'</td><td>'
+     +escHtml(runNature(r.start,r.end))+'</td></tr>';
+   }
+   h+='</table>';
+   if(runs.length>=200) h+='<p class="hint">(先頭 200 箇所で打ち切りました)</p>';
+  }
+ } else {
+  h+='<p class="hint">比較ファイルを読み込むと、差分がどの構造部分にあたるかを対応付けて表示します。</p>';
+ }
+ h+='<p class="hint">オフセットをクリックするとその位置へ移動します。'
+  +'構造チェックに対応する形式: PNG / JPEG / GIF / BMP / RIFF / PDF / ZIP系 / GZIP。'
+  +'PNG と ZIP は内部の検査値を検証するため、破損の判定は確実です。それ以外は署名・長さ・終端の整合性による判定です。</p>';
+ openModal('破損診断',h,'閉じる',undefined,true);
+}
 /* ================= ダイアログ ================= */
-function openModal(title,bodyHtml,okLabel,onOk){
+function openModal(title,bodyHtml,okLabel,onOk,wide){
  mtitle.textContent=title;
  mbody.innerHTML=bodyHtml;
  mok.textContent=okLabel||'OK';
+ modal.querySelector('.mcard').classList.toggle('wide',!!wide);
+ mcancel.hidden=!onOk;
  modalOpen=true;
  modal.hidden=false;
  const f=mbody.querySelector('input,textarea,select');
@@ -900,6 +1281,7 @@ $('#b-cmp').onclick=openCompare;
 $('#b-diffnext').onclick=()=>gotoDiff(1);
 $('#b-diffprev').onclick=()=>gotoDiff(-1);
 $('#b-cmpclear').onclick=clearCompare;
+$('#b-diag').onclick=diagnose;
 $('#b-help').onclick=dlgHelp;
 $('#w-sample').onclick=()=>{ loadBytes(sampleBytes(),'sample-1x1.png','image/png'); };
 mcancel.onclick=closeModal;
@@ -907,6 +1289,14 @@ $('#mclose').onclick=closeModal;
 modal.addEventListener('mousedown',e=>{ if(e.target===modal) closeModal(); });
 mbody.addEventListener('keydown',e=>{
  if(e.key==='Enter'&&e.target.tagName!=='TEXTAREA'){ e.preventDefault(); mok.click(); }
+});
+mbody.addEventListener('click',e=>{
+ const t=e.target.closest('[data-jump]');
+ if(!t) return;
+ const o=+t.dataset.jump;
+ if(!data||!(o>=0)||o>=data.length) return flash('その位置は編集側のファイル範囲外です');
+ closeModal();
+ selA=selB=-1; cursor=o; scrollToCenter(o); render();
 });
 fileInput.addEventListener('change',async()=>{
  const f=fileInput.files&&fileInput.files[0];
